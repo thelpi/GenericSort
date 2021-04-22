@@ -51,7 +51,7 @@ namespace GenericSort
         /// <paramref name="errorManagementType"/> is set to <see cref="ErrorManagementType.Throw"/> and <paramref name="propertyNames"/> contains an unknown property.
         /// </exception>
         public static IEnumerable<T> OrderBy<T>(
-            IEnumerable<T> sourceCollection,
+            this IEnumerable<T> sourceCollection,
             IEnumerable<string> propertyNames,
             IEnumerable<string> descPropertyNames,
             ErrorManagementType errorManagementType = ErrorManagementType.Ignore,

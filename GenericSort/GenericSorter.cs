@@ -11,6 +11,11 @@ namespace GenericSort
     public static class GenericSorter
     {
         /// <summary>
+        /// The caracter that separates a property from its sub-property.
+        /// </summary>
+        public static char PropertyTreeSeparator { get; set; } = '.';
+
+        /// <summary>
         /// Sorts a collection of items using dynamic fields.
         /// </summary>
         /// <typeparam name="T">Targeted type in <paramref name="sourceCollection"/>.</typeparam>
@@ -20,7 +25,7 @@ namespace GenericSort
         /// If the property is not included in <paramref name="descPropertyNames"/>, the sort is ascending.
         /// The syntax "Property1.Property2" is allowed to sort on a sub-property (property of property).
         /// Sub-property of sub-property is not allowed.
-        /// Property name must be an exact match.
+        /// Property name must be an exact match (but name is trimmed).
         /// Allowed properties are public and not static.
         /// </param>
         /// <param name="descPropertyNames">
@@ -41,19 +46,15 @@ namespace GenericSort
         /// <exception cref="ArgumentNullException"><paramref name="descPropertyNames"/> is <c>null</c>.</exception>
         /// <exception cref="ArgumentNullException"><paramref name="propertyNames"/> is <c>null</c>.</exception>
         /// <exception cref="ArgumentNullException"><paramref name="sourceCollection"/> is <c>null</c>.</exception>
-        /// <exception cref="ArgumentException">
-        /// <paramref name="propertyNames"/> contains an invalid property name.
-        /// </exception>
-        /// <exception cref="ArgumentException">
-        /// <paramref name="descPropertyNames"/> contains a property not included into <paramref name="propertyNames"/>.
-        /// </exception>
-        /// <exception cref="ArgumentException">
-        /// <paramref name="errorManagementType"/> is set to <see cref="ErrorManagementType.Throw"/> and <paramref name="propertyNames"/> contains an unknown property.
-        /// </exception>
-        public static IEnumerable<T> OrderBy<T>(
-            this IEnumerable<T> sourceCollection,
-            IEnumerable<string> propertyNames,
-            IEnumerable<string> descPropertyNames,
+        /// <exception cref="ArgumentException"><paramref name="propertyNames"/> contains an invalid property name.</exception>
+        /// <exception cref="ArgumentException"><paramref name="descPropertyNames"/> contains a property not included into <paramref name="propertyNames"/>.</exception>
+        /// <exception cref="ArgumentException"><paramref name="errorManagementType"/> is set to <see cref="ErrorManagementType.Throw"/> and <paramref name="propertyNames"/> contains an unknown property.</exception>
+        /// <exception cref="ArgumentException"><paramref name="propertyNames"/> contains duplicate.</exception>
+        /// <exception cref="ArgumentException"><paramref name="descPropertyNames"/> contains duplicate.</exception>
+        public static IReadOnlyCollection<T> OrderBy<T>(
+            this IReadOnlyCollection<T> sourceCollection,
+            IReadOnlyCollection<string> propertyNames,
+            IReadOnlyCollection<string> descPropertyNames,
             ErrorManagementType errorManagementType = ErrorManagementType.Ignore,
             bool nullFirst = false)
         {
@@ -73,56 +74,67 @@ namespace GenericSort
             }
 
             // no sort required
-            if (!sourceCollection.Any() || !propertyNames.Any())
+            if (sourceCollection.Count == 0 || propertyNames.Count == 0)
             {
                 return sourceCollection;
             }
 
-            foreach (var propertyName in propertyNames)
+            var propertyNamesClean = new List<string>(propertyNames.ToTrimmedStrings());
+
+            foreach (var propertyName in propertyNamesClean)
             {
                 if (string.IsNullOrWhiteSpace(propertyName)
-                    || propertyName.StartsWith('.')
-                    || propertyName.EndsWith('.')
-                    || propertyName.Count(c => c == '.') > 1)
+                    || propertyName.StartsWith(PropertyTreeSeparator)
+                    || propertyName.EndsWith(PropertyTreeSeparator)
+                    || propertyName.Count(c => c == PropertyTreeSeparator) > 1)
                 {
                     throw new ArgumentException($"{nameof(propertyNames)} contains an invalid property name.", nameof(propertyNames));
                 }
             }
 
-            foreach (var descPropertyName in descPropertyNames)
+            CheckForListDuplicate(propertyNamesClean, nameof(propertyNames));
+
+            var descPropertyNamesClean = new List<string>(descPropertyNames.ToTrimmedStrings());
+
+            foreach (var descPropertyName in descPropertyNamesClean)
             {
-                if (!propertyNames.Contains(descPropertyName))
+                if (!propertyNamesClean.Contains(descPropertyName))
                 {
                     throw new ArgumentException($"{nameof(descPropertyNames)} contains a property not included into {nameof(propertyNames)}.", nameof(descPropertyNames));
                 }
             }
+            
+            CheckForListDuplicate(descPropertyNamesClean, nameof(descPropertyNames));
+
+            var nullObjectsList = sourceCollection.Where(_ => _ == null).ToList();
 
             // transforms into IOrderedEnumerable<T> without doing an actual sort
-            var sortableObjectsList = sourceCollection.OrderBy(_ => 1);
+            var sortableObjectsList = sourceCollection.Except(nullObjectsList).OrderBy(_ => 1);
 
             var isFirstSort = true;
-            foreach (var propertyName in propertyNames)
+            foreach (var propertyName in propertyNamesClean)
             {
                 // this will contain the field to use as a sort
                 Func<T, object> sortKeySelector = null;
-                if (propertyName.Contains("."))
+                if (propertyName.Contains(PropertyTreeSeparator))
                 {
                     // field to sort is on a subproperty of a property
-                    var propNameLevel1 = propertyName.Split('.')[0];
-                    var propNameLevel2 = propertyName.Split('.')[1];
+                    var propNameComponents = propertyName.Split(PropertyTreeSeparator);
+                    var propNameLevel1 = propNameComponents[0];
+                    var propNameLevel2 = propNameComponents[1];
 
                     if (string.IsNullOrWhiteSpace(propNameLevel1) || string.IsNullOrWhiteSpace(propNameLevel2))
                     {
                         throw new ArgumentException($"{nameof(propertyNames)} contains an invalid property name.", nameof(propertyNames));
                     }
 
-                    var propertyLevel1 = GetPropertyInfo(typeof(T), propNameLevel1, errorManagementType, nameof(propertyNames));
+                    var propertyLevel1 = typeof(T).GetPropertyInfo(propNameLevel1, errorManagementType, nameof(propertyNames));
                     if (propertyLevel1 == null)
                     {
                         continue;
                     }
 
-                    var propertyLevel2 = GetPropertyInfo(propertyLevel1.PropertyType, propNameLevel2, errorManagementType, nameof(propertyNames));
+                    var propertyLevel2 = propertyLevel1.PropertyType.GetPropertyInfo(propNameLevel2, errorManagementType, nameof(propertyNames));
                     if (propertyLevel2 == null)
                     {
                         continue;
@@ -139,7 +151,7 @@ namespace GenericSort
                 }
                 else
                 {
-                    var property = GetPropertyInfo(typeof(T), propertyName, errorManagementType, nameof(propertyNames));
+                    var property = typeof(T).GetPropertyInfo(propertyName, errorManagementType, nameof(propertyNames));
                     if (property == null)
                     {
                         continue;
@@ -149,7 +161,7 @@ namespace GenericSort
                     sortKeySelector = (p) => property.GetValue(p);
                 }
 
-                var isDesc = descPropertyNames.Contains(propertyName);
+                var isDesc = descPropertyNamesClean.Contains(propertyName);
 
                 if (isFirstSort)
                 {
@@ -166,17 +178,25 @@ namespace GenericSort
                 }
             }
 
-            if (nullFirst)
-            {
-                // puts null in first position
-                sortableObjectsList = sortableObjectsList.OrderBy(_ => _ != null);
-            }
+            var finalObjectsList = sortableObjectsList.ToList();
+            finalObjectsList.AddRange(nullObjectsList);
 
-            return sortableObjectsList;
+            // puts null in first or last position
+            return finalObjectsList
+                .OrderBy(_ => nullFirst ? _ != null : _ == null)
+                .ToList();
+        }
+
+        private static void CheckForListDuplicate(IReadOnlyCollection<string> sourceList, string parameterName)
+        {
+            if (sourceList.Count != sourceList.Distinct().Count())
+            {
+                throw new ArgumentException($"{parameterName} contains duplicate.", parameterName);
+            }
         }
 
         private static PropertyInfo GetPropertyInfo(
-            Type type,
+            this Type type,
             string propertyName,
             ErrorManagementType errorManagementType,
             string parameterName)
@@ -198,6 +218,11 @@ namespace GenericSort
             }
 
             return property;
+        }
+
+        private static IEnumerable<string> ToTrimmedStrings(this IEnumerable<string> stringsList)
+        {
+            return stringsList.Select(_ => _ == null ? _ : _.Trim());
         }
     }
 }

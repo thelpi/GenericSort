@@ -27,24 +27,27 @@ namespace GenericSort
         /// Sub-property of sub-property is not allowed.
         /// Property name must be an exact match (but name is trimmed).
         /// Allowed properties are public and not static.
+        /// <c>Null</c> is equivalent to an empty list.
         /// </param>
         /// <param name="descPropertyNames">
         /// Collection of properties on which a descending sort is applied.
         /// Must be included in <paramref name="propertyNames"/>.
+        /// <c>Null</c> is equivalent to an empty list.
         /// </param>
         /// <param name="errorManagementType">
         /// Optionnal.
         /// Sets the behavior in case of error while processing a field.
         /// By default errors are ignored.</param>
-        /// <param name="nullFirst">
+        /// <param name="nullObjectsFirst">
         /// Optionnal.
         /// Puts <c>null</c> elements in first place if enabled.
         /// Doesn't apply if <typeparamref name="T"/> is not a nullable type.
-        /// Doesn't apply for sub-properties.
+        /// </param>
+        /// <param name="nullValuesAlwaysLast">
+        /// Optionnal.
+        /// Set <c>True</c> to always put objects with <c>Null</c> property at last (regardless of ascending or descending sort).
         /// </param>
         /// <returns>The sorted collection of items.</returns>
-        /// <exception cref="ArgumentNullException"><paramref name="descPropertyNames"/> is <c>null</c>.</exception>
-        /// <exception cref="ArgumentNullException"><paramref name="propertyNames"/> is <c>null</c>.</exception>
         /// <exception cref="ArgumentNullException"><paramref name="sourceCollection"/> is <c>null</c>.</exception>
         /// <exception cref="ArgumentException"><paramref name="propertyNames"/> contains an invalid property name.</exception>
         /// <exception cref="ArgumentException"><paramref name="descPropertyNames"/> contains a property not included into <paramref name="propertyNames"/>.</exception>
@@ -56,25 +59,18 @@ namespace GenericSort
             IReadOnlyCollection<string> propertyNames,
             IReadOnlyCollection<string> descPropertyNames,
             ErrorManagementType errorManagementType = ErrorManagementType.Ignore,
-            bool nullFirst = false)
+            bool nullObjectsFirst = false,
+            bool nullValuesAlwaysLast = false)
         {
             if (sourceCollection == null)
             {
                 throw new ArgumentNullException(nameof(sourceCollection));
             }
 
-            if (propertyNames == null)
-            {
-                throw new ArgumentNullException(nameof(propertyNames));
-            }
-
-            if (descPropertyNames == null)
-            {
-                throw new ArgumentNullException(nameof(descPropertyNames));
-            }
-
             // no sort required
-            if (sourceCollection.Count == 0 || propertyNames.Count == 0)
+            if (sourceCollection.Count == 0
+                || propertyNames == null
+                || propertyNames.Count == 0)
             {
                 return sourceCollection;
             }
@@ -94,7 +90,7 @@ namespace GenericSort
 
             CheckForListDuplicate(propertyNamesClean, nameof(propertyNames));
 
-            var descPropertyNamesClean = new List<string>(descPropertyNames.ToTrimmedStrings());
+            var descPropertyNamesClean = new List<string>((descPropertyNames ?? Enumerable.Empty<string>()).ToTrimmedStrings());
 
             foreach (var descPropertyName in descPropertyNamesClean)
             {
@@ -110,8 +106,7 @@ namespace GenericSort
 
             // transforms into IOrderedEnumerable<T> without doing an actual sort
             var sortableObjectsList = sourceCollection.Except(nullObjectsList).OrderBy(_ => 1);
-
-            var isFirstSort = true;
+            
             foreach (var propertyName in propertyNamesClean)
             {
                 // this will contain the field to use as a sort
@@ -163,19 +158,14 @@ namespace GenericSort
 
                 var isDesc = descPropertyNamesClean.Contains(propertyName);
 
-                if (isFirstSort)
+                if (nullValuesAlwaysLast)
                 {
-                    isFirstSort = false;
-                    sortableObjectsList = isDesc
-                        ? sortableObjectsList.OrderByDescending(sortKeySelector)
-                        : sortableObjectsList.OrderBy(sortKeySelector);
+                    sortableObjectsList = sortableObjectsList.ThenBy(_ => sortKeySelector(_) == null);
                 }
-                else
-                {
-                    sortableObjectsList = isDesc
-                        ? sortableObjectsList.ThenByDescending(sortKeySelector)
-                        : sortableObjectsList.ThenBy(sortKeySelector);
-                }
+
+                sortableObjectsList = isDesc
+                    ? sortableObjectsList.ThenByDescending(sortKeySelector)
+                    : sortableObjectsList.ThenBy(sortKeySelector);
             }
 
             var finalObjectsList = sortableObjectsList.ToList();
@@ -183,7 +173,7 @@ namespace GenericSort
 
             // puts null in first or last position
             return finalObjectsList
-                .OrderBy(_ => nullFirst ? _ != null : _ == null)
+                .OrderBy(_ => nullObjectsFirst != (_ == null))
                 .ToList();
         }
 
@@ -206,11 +196,8 @@ namespace GenericSort
             {
                 property = type.GetProperty(propertyName);
             }
-            catch (Exception ex)
+            catch
             {
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"GetProperty exception: {ex.Message}");
-#endif
                 if (errorManagementType == ErrorManagementType.Throw)
                 {
                     throw new ArgumentException($"{parameterName} contains an unknown property: {propertyName}.", parameterName);

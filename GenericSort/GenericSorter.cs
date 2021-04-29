@@ -84,7 +84,7 @@ namespace GenericSort
                     || propertyName.EndsWith(PropertyTreeSeparator)
                     || propertyName.Count(c => c == PropertyTreeSeparator) > 1)
                 {
-                    throw new ArgumentException($"{nameof(propertyNames)} contains an invalid property name.", nameof(propertyNames));
+                    throw new ArgumentException(GetInvalidPropertyNameMessage(nameof(propertyNames)), nameof(propertyNames));
                 }
             }
 
@@ -96,7 +96,7 @@ namespace GenericSort
             {
                 if (!propertyNamesClean.Contains(descPropertyName))
                 {
-                    throw new ArgumentException($"{nameof(descPropertyNames)} contains a property not included into {nameof(propertyNames)}.", nameof(descPropertyNames));
+                    throw new ArgumentException(GetNotIncludedPropertyNameMessage(nameof(descPropertyNames), nameof(propertyNames)), nameof(descPropertyNames));
                 }
             }
             
@@ -117,11 +117,6 @@ namespace GenericSort
                     var propNameComponents = propertyName.Split(PropertyTreeSeparator);
                     var propNameLevel1 = propNameComponents[0];
                     var propNameLevel2 = propNameComponents[1];
-
-                    if (string.IsNullOrWhiteSpace(propNameLevel1) || string.IsNullOrWhiteSpace(propNameLevel2))
-                    {
-                        throw new ArgumentException($"{nameof(propertyNames)} contains an invalid property name.", nameof(propertyNames));
-                    }
 
                     var propertyLevel1 = typeof(T).GetPropertyInfo(propNameLevel1, errorManagementType, nameof(propertyNames));
                     if (propertyLevel1 == null)
@@ -181,7 +176,7 @@ namespace GenericSort
         {
             if (sourceList.Count != sourceList.Distinct().Count())
             {
-                throw new ArgumentException($"{parameterName} contains duplicate.", parameterName);
+                throw new ArgumentException(GetDuplicatePropertiesMessage(parameterName), parameterName);
             }
         }
 
@@ -191,18 +186,15 @@ namespace GenericSort
             ErrorManagementType errorManagementType,
             string parameterName)
         {
-            PropertyInfo property = null;
-            try
+            var property = type.GetProperty(propertyName);
+            if (property == null && errorManagementType == ErrorManagementType.Throw)
             {
-                property = type.GetProperty(propertyName);
+                throw new ArgumentException(GetUnknownPropertyMessage(propertyName, parameterName), parameterName);
             }
-            catch
-            {
-                if (errorManagementType == ErrorManagementType.Throw)
-                {
-                    throw new ArgumentException($"{parameterName} contains an unknown property: {propertyName}.", parameterName);
-                }
-            }
+            // note: 'AmbiguousMatchException' can't be thrown in this context
+            // as we give a full property name
+            // and we search on public and instance properties only
+            // (ie no duplicate property name possible)
 
             return property;
         }
@@ -211,5 +203,29 @@ namespace GenericSort
         {
             return stringsList.Select(_ => _ == null ? _ : _.Trim());
         }
+
+        #region Error messages management
+
+        internal static string GetInvalidPropertyNameMessage(string parameterName)
+        {
+            return $"{parameterName} contains an invalid property name.";
+        }
+
+        internal static string GetNotIncludedPropertyNameMessage(string parameterNameDescList, string parameterNamebaseList)
+        {
+            return $"{parameterNameDescList} contains a property not included into {parameterNamebaseList}.";
+        }
+
+        internal static string GetDuplicatePropertiesMessage(string parameterName)
+        {
+            return $"{parameterName} contains duplicate.";
+        }
+
+        internal static string GetUnknownPropertyMessage(string propertyName, string parameterName)
+        {
+            return $"{parameterName} contains an unknown property: {propertyName}.";
+        }
+
+        #endregion Error messages management
     }
 }

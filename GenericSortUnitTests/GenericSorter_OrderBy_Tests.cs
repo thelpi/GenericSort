@@ -11,7 +11,7 @@ namespace GenericSortUnitTests
         private static Random _randomizer = new Random();
 
         [Fact]
-        public void NominalBehavior_NullObjectsFirst_CustomSeparator()
+        public void NominalBehavior_NullObjectsFirst_CustomSeparator_IgnoreFakeProperties()
         {
             // Arrange
             GenericSorter.PropertyTreeSeparator = '$';
@@ -28,12 +28,14 @@ namespace GenericSortUnitTests
                 nameof(FakePeople.IsGirl),
                 nameof(FakePeople.Mother) + GenericSorter.PropertyTreeSeparator + nameof(FakePeople.Salary),
                 nameof(FakePeople.Name),
-                nameof(FakePeople.DateOfBirth)
+                nameof(FakePeople.DateOfBirth),
+                "NotExistingProperty"
             };
             var descProperties = new List<string>
             {
                 nameof(FakePeople.IsGirl),
-                nameof(FakePeople.DateOfBirth)
+                nameof(FakePeople.DateOfBirth),
+                "NotExistingProperty"
             };
 
             var expected = datas
@@ -124,6 +126,173 @@ namespace GenericSortUnitTests
             }
         }
 
-        // TODO : failure unit tests
+        [Fact]
+        public void NominalBehavior_SourceItemsListIsEmpty_DoNothing()
+        {
+            // Arrange
+            var items = new List<FakePeople>();
+
+            // Act
+            var result = items.OrderBy(
+                new List<string> { nameof(FakePeople.DateOfBirth) },
+                new List<string>());
+
+            // Assert
+            Assert.Equal(items, result); // same reference
+        }
+
+        [Fact]
+        public void NominalBehavior_PropertyNamesListIsNull_DoesNothing()
+        {
+            // Arrange
+            var items = new List<FakePeople> { new FakePeople() };
+
+            // Act
+            var result = items.OrderBy(
+                null,
+                new List<string>());
+
+            // Assert
+            Assert.Equal(items, result); // same reference
+        }
+
+        [Fact]
+        public void NominalBehavior_PropertyNamesListIsEmpty_DoesNothing()
+        {
+            // Arrange
+            var items = new List<FakePeople> { new FakePeople() };
+
+            // Act
+            var result = items.OrderBy(
+                new List<string>(),
+                new List<string>());
+
+            // Assert
+            Assert.Equal(items, result); // same reference
+        }
+
+        [Fact]
+        public void ErrorBehavior_SourceItemsListIsNull_ThrowsException()
+        {
+            // Arrange
+            List<FakePeople> items = null;
+
+            // Act
+            var ex = Assert.Throws<ArgumentNullException>(() =>
+                items.OrderBy(new List<string>(), new List<string>()));
+
+            // Assert
+            Assert.Equal("sourceCollection", ex.ParamName);
+        }
+
+        [Theory]
+        [InlineData(" ")]
+        [InlineData(" $Bidule")]
+        [InlineData("Machin$ ")]
+        [InlineData("truc$bidule$machin")]
+        public void ErrorBehavior_InvalidPropertyName_ThrowsException(string propertyName)
+        {
+            // Arrange
+            var items = new List<FakePeople> { new FakePeople() };
+
+            GenericSorter.PropertyTreeSeparator = '$';
+
+            // Act
+            var ex = Assert.Throws<ArgumentException>(() =>
+                items.OrderBy(
+                    new List<string> { propertyName },
+                    new List<string>()));
+
+            // Assert
+            Assert.Equal("propertyNames", ex.ParamName);
+            Assert.StartsWith(GenericSorter.GetInvalidPropertyNameMessage("propertyNames"), ex.Message);
+        }
+
+        [Fact]
+        public void ErrorBehavior_DescPropertyNameNotInPropertyNamesList_ThrowsException()
+        {
+            // Arrange
+            var items = new List<FakePeople> { new FakePeople() };
+
+            // Act
+            var ex = Assert.Throws<ArgumentException>(() =>
+                items.OrderBy(
+                    new List<string> { "bidule" },
+                    new List<string> { "machin" }));
+
+            // Assert
+            Assert.Equal("descPropertyNames", ex.ParamName);
+            Assert.StartsWith(GenericSorter.GetNotIncludedPropertyNameMessage("descPropertyNames", "propertyNames"), ex.Message);
+        }
+
+        [Fact]
+        public void ErrorBehavior_PropertyNamesListContainsDuplicate_ThrowsException()
+        {
+            // Arrange
+            var items = new List<FakePeople> { new FakePeople() };
+
+            // Act
+            var ex = Assert.Throws<ArgumentException>(() =>
+                items.OrderBy(
+                    new List<string> { "bidule ", " bidule" },
+                    new List<string>()));
+
+            // Assert
+            Assert.Equal("propertyNames", ex.ParamName);
+            Assert.StartsWith(GenericSorter.GetDuplicatePropertiesMessage("propertyNames"), ex.Message);
+        }
+
+        [Fact]
+        public void ErrorBehavior_DescPropertyNamesListContainsDuplicate_ThrowsException()
+        {
+            // Arrange
+            var items = new List<FakePeople> { new FakePeople() };
+
+            // Act
+            var ex = Assert.Throws<ArgumentException>(() =>
+                items.OrderBy(
+                    new List<string> { "bidule" },
+                    new List<string> { "bidule ", " bidule" }));
+
+            // Assert
+            Assert.Equal("descPropertyNames", ex.ParamName);
+            Assert.StartsWith(GenericSorter.GetDuplicatePropertiesMessage("descPropertyNames"), ex.Message);
+        }
+
+        [Fact]
+        public void ErrorBehavior_PropertyDoesntExist_ThrowModeEnabled_ThrowsException()
+        {
+            // Arrange
+            var items = new List<FakePeople> { new FakePeople() };
+
+            // Act
+            var ex = Assert.Throws<ArgumentException>(() =>
+                items.OrderBy(
+                    new List<string> { "bidule" },
+                    new List<string>(),
+                    errorManagementType: ErrorManagementType.Throw));
+
+            // Assert
+            Assert.Equal("propertyNames", ex.ParamName);
+            Assert.StartsWith(GenericSorter.GetUnknownPropertyMessage("bidule", "propertyNames"), ex.Message);
+        }
+
+        [Fact]
+        public void ErrorBehavior_SubPropertyDoesntExist_ThrowModeEnabled_ThrowsException()
+        {
+            // Arrange
+            var items = new List<FakePeople> { new FakePeople() };
+
+            // Act
+            var ex = Assert.Throws<ArgumentException>(() =>
+                items.OrderBy(
+                    new List<string> { nameof(FakePeople.Mother) + GenericSorter.PropertyTreeSeparator + "bidule" },
+                    new List<string>(),
+                    errorManagementType: ErrorManagementType.Throw));
+
+            // Assert
+            Assert.Equal("propertyNames", ex.ParamName);
+            Assert.StartsWith(GenericSorter.GetUnknownPropertyMessage("bidule", "propertyNames"), ex.Message);
+        }
     }
 }
